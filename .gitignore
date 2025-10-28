@@ -1,0 +1,15 @@
+runs/   
+.venv/
+detect_images/
+__pycache__/
+*.pt
+*.pth
+*.ptl
+*.pthl
+*.ptz
+*.pthz
+*.ptlz
+*.pthlz
+*.ptlzl
+*.pthlzl
+
