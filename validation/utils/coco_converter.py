@@ -37,6 +37,53 @@ def get_incremental_dir(base_dir: str, name: str = "exp") -> Path:
         i += 1
 
 
+def find_yaml_file(dataset_dir: Path) -> Path:
+    """データセットディレクトリからYAML設定ファイルを柔軟に検索
+    
+    優先順位:
+    1. data.yaml (Ultralytics標準)
+    2. dataset.yaml (よくある代替名)
+    3. *.yaml または *.yml (最初に見つかったもの)
+    
+    Args:
+        dataset_dir: データセットディレクトリ
+        
+    Returns:
+        見つかったYAMLファイルのパス
+        
+    Raises:
+        FileNotFoundError: YAMLファイルが見つからない場合
+    """
+    # 優先順位1: data.yaml
+    candidate = dataset_dir / "data.yaml"
+    if candidate.exists():
+        return candidate
+    
+    # 優先順位2: dataset.yaml
+    candidate = dataset_dir / "dataset.yaml"
+    if candidate.exists():
+        return candidate
+    
+    # 優先順位3: *.yaml
+    yaml_files = list(dataset_dir.glob("*.yaml"))
+    if yaml_files:
+        return yaml_files[0]
+    
+    # 優先順位4: *.yml
+    yml_files = list(dataset_dir.glob("*.yml"))
+    if yml_files:
+        return yml_files[0]
+    
+    # 見つからない場合
+    raise FileNotFoundError(
+        f"YAMLファイルが見つかりません: {dataset_dir}\n"
+        f"以下のいずれかのファイルが必要です:\n"
+        f"  - data.yaml (推奨)\n"
+        f"  - dataset.yaml\n"
+        f"  - 任意の*.yamlまたは*.ymlファイル"
+    )
+
+
 class YOLOToCOCOConverter:
     """YOLO形式のデータセットをCOCO形式に変換するクラス"""
 
@@ -48,16 +95,23 @@ class YOLOToCOCOConverter:
         """
         self.yolo_dataset_dir = Path(yolo_dataset_dir)
         self.split = split
-        self.data_yaml_path = self.yolo_dataset_dir / "data.yaml"
         
-        # data.yamlを読み込み
-        if not self.data_yaml_path.exists():
-            raise FileNotFoundError(f"data.yamlが見つかりません: {self.data_yaml_path}")
+        # YAMLファイルを柔軟に検索
+        self.data_yaml_path = find_yaml_file(self.yolo_dataset_dir)
         
+        # YAMLファイルを読み込み
         with open(self.data_yaml_path, "r", encoding="utf-8") as f:
             self.data_config = yaml.safe_load(f)
         
-        self.class_names = self.data_config.get("names", [])
+        # クラス名の取得（辞書形式とリスト形式の両方に対応）
+        names = self.data_config.get("names", [])
+        if isinstance(names, dict):
+            # 辞書形式の場合（例: {0: 'class1', 1: 'class2'}）
+            self.class_names = [names[i] for i in sorted(names.keys())]
+        else:
+            # リスト形式の場合（例: ['class1', 'class2']）
+            self.class_names = names
+        
         self.num_classes = self.data_config.get("nc", len(self.class_names))
         
         # パス設定

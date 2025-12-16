@@ -11,7 +11,7 @@
 ### **1. Ultralyticsで公式精度を測定（推奨）**
 
 ```bash
-python validate.py ultralytics --model runs/train/train12/weights/best.pt
+uv run validate.py ultralytics --model runs/train/train12/weights/best.pt
 ```
 
 **出力例:**
@@ -26,13 +26,13 @@ python validate.py ultralytics --model runs/train/train12/weights/best.pt
 ### **2. SAHIでスライス推論の効果を測定**
 
 ```bash
-python validate.py sahi --yolo-dataset Dataset/YOLODataset_test_with_label
+uv run validate.py sahi --yolo-dataset Dataset/YOLODataset_test_with_label
 ```
 
 ### **3. 一度に両方を実行して比較（最もおすすめ）**
 
 ```bash
-python validate.py compare \
+uv run validate.py compare \
   --yolo-dataset Dataset/YOLODataset_test_with_label \
   --error-analysis
 ```
@@ -73,16 +73,60 @@ yolo12_detect/
 
 ---
 
+## 📝 データセット要件
+
+### YAMLファイルの柔軟な検索
+
+SAHIモードは以下の優先順位でYAMLファイルを自動検索します：
+
+1. **data.yaml** （Ultralytics標準）
+2. **dataset.yaml** （よくある代替名）
+3. **任意の*.yamlまたは*.yml** （最初に見つかったもの）
+
+```
+Dataset/YOLODataset_xxx/
+├── data.yaml          ✅ 推奨
+├── dataset.yaml       ✅ OK
+├── config.yaml        ✅ OK（他にない場合）
+├── images/
+│   └── val/
+└── labels/
+    └── val/
+```
+
+### YAML形式
+
+**辞書形式（推奨）**:
+```yaml
+names:
+  0: class1
+  1: class2
+  2: class3
+nc: 3  # オプション（自動計算可）
+train: images/train
+val: images/val
+```
+
+**リスト形式（対応済み）**:
+```yaml
+names: [class1, class2, class3]
+nc: 3  # オプション（自動計算可）
+train: images/train
+val: images/val
+```
+
+---
+
 ## 🎓 詳細な使い方
 
 ### **モード1: Ultralytics標準評価**
 
 ```bash
 # 基本
-python validate.py ultralytics
+uv run validate.py ultralytics
 
 # カスタム設定
-python validate.py ultralytics \
+uv run validate.py ultralytics \
   --model runs/train/train12/weights/best.pt \
   --name my_validation \
   --imgsz 640 \
@@ -99,10 +143,10 @@ python validate.py ultralytics \
 
 ```bash
 # 基本
-python validate.py sahi --yolo-dataset Dataset/YOLODataset_test_with_label
+uv run validate.py sahi --yolo-dataset Dataset/YOLODataset_test_with_label
 
 # エラー解析付き
-python validate.py sahi \
+uv run validate.py sahi \
   --yolo-dataset Dataset/YOLODataset_test_with_label \
   --error-analysis \
   --export-visuals
@@ -116,7 +160,7 @@ python validate.py sahi \
 ### **モード3: 比較モード（⭐ 最もおすすめ）**
 
 ```bash
-python validate.py compare \
+uv run validate.py compare \
   --yolo-dataset Dataset/YOLODataset_test_with_label \
   --name comprehensive_eval \
   --error-analysis \
@@ -189,7 +233,7 @@ python diagnose_difference.py ...
 ### **移行後（推奨）**
 ```bash
 # 1つのコマンドで全て実行
-python validate.py compare \
+uv run validate.py compare \
   --yolo-dataset Dataset/YOLODataset_test_with_label \
   --error-analysis
 ```
@@ -208,13 +252,13 @@ python ultralytics_val.py
 ### **日常的な評価**
 ```bash
 # クイックチェック（高速）
-python validate.py ultralytics
+uv run validate.py ultralytics
 ```
 
 ### **詳細な分析**
 ```bash
 # 包括的な評価（推奨）
-python validate.py compare \
+uv run validate.py compare \
   --yolo-dataset Dataset/YOLODataset_test_with_label \
   --error-analysis
 ```
@@ -222,10 +266,10 @@ python validate.py compare \
 ### **実験比較**
 ```bash
 # 実験1
-python validate.py compare --name exp1 --error-analysis
+uv run validate.py compare --name exp1 --error-analysis
 
 # 実験2（異なる設定）
-python validate.py compare --name exp2 --error-analysis
+uv run validate.py compare --name exp2 --error-analysis
 
 # 結果はそれぞれ別ディレクトリに保存される
 # runs/val/exp1/
@@ -251,7 +295,7 @@ python validate.py compare --name exp2 --error-analysis
 
 3. **比較モードを常に使う**
    ```bash
-   python validate.py compare ...
+   uv run validate.py compare ...
    ```
 
 ### ❌ **DON'T（やってはいけないこと）**
@@ -264,7 +308,7 @@ python validate.py compare --name exp2 --error-analysis
 2. **単独でSAHIだけを実行しない**
    ```bash
    # これだけだと誤解する可能性
-   python validate.py sahi ...
+   uv run validate.py sahi ...
    ```
 
 ---
@@ -286,7 +330,7 @@ python validate.py compare --name exp2 --error-analysis
 
 ```bash
 # ステップ1: 包括的な評価を実行
-python validate.py compare \
+uv run validate.py compare \
   --yolo-dataset Dataset/YOLODataset_test_with_label \
   --error-analysis
 
@@ -300,7 +344,7 @@ python validate.py compare \
 # - ハイパーパラメータの調整
 
 # ステップ4: 再評価
-python validate.py compare --name exp2 --error-analysis
+uv run validate.py compare --name exp2 --error-analysis
 ```
 
 ### **あなたのモデルは良好です！**

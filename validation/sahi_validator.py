@@ -7,9 +7,11 @@ This module provides SAHI-based validation with sliced inference for YOLO models
 import json
 import sys
 import time
+import csv
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
+from collections import defaultdict, Counter
 
 import numpy as np
 from tqdm import tqdm
@@ -75,6 +77,10 @@ class SAHIValidationConfig:
     # Prediction only mode
     predict_only: bool = False
     
+    # CSV export
+    save_csv: bool = False
+    csv_path: Optional[str] = None
+    
     # Other
     verbose: int = 1
     
@@ -124,6 +130,8 @@ class SAHIValidationConfig:
                 if self.verbose >= 1:
                     print(f"YOLO形式からCOCO形式に変換中...")
                 converter = YOLOToCOCOConverter(self.yolo_dataset_dir, split="val")
+                if self.verbose >= 1:
+                    print(f"  使用するYAML: {converter.data_yaml_path.name}")
                 self.dataset_json_path = converter.convert(self.dataset_json_path)
             
             # 画像ディレクトリを設定
@@ -203,6 +211,8 @@ class SAHISegmentationValidator:
             print("推論を開始します...")
 
         self.predictions_json = []
+        self.detection_stats = defaultdict(lambda: defaultdict(int))  # 画像ごとのクラス別カウント
+        
         image_paths = [
             str(Path(self.config.image_dir) / coco_image.file_name)
             for coco_image in self.coco.images
@@ -253,12 +263,17 @@ class SAHISegmentationValidator:
                         verbose=0,
                     )
 
-                # COCO形式に変換
+                # COCO形式に変換とカウント
+                image_name = Path(image_path).name
                 for object_prediction in prediction_result.object_prediction_list:
                     coco_prediction = object_prediction.to_coco_prediction(image_id=coco_image.id)
                     coco_prediction_json = coco_prediction.json
                     if coco_prediction_json.get("bbox") or coco_prediction_json.get("segmentation"):
                         self.predictions_json.append(coco_prediction_json)
+                        # クラスごとのカウント
+                        class_name = object_prediction.category.name
+                        self.detection_stats[image_name][class_name] += 1
+                        self.detection_stats[image_name]['total'] += 1
                 
                 # 可視化の実行
                 if self.config.export_visuals:
@@ -319,6 +334,50 @@ class SAHISegmentationValidator:
             print(f"成功: {success_count}枚, エラー: {error_count}枚")
             if self.config.export_visuals:
                 print(f"可視化: {visual_count}枚 (保存先: {self.config.visual_export_dir})")
+        
+        # CSV保存
+        if self.config.save_csv:
+            self.save_detection_csv()
+
+    def save_detection_csv(self) -> None:
+        """検出結果をCSVファイルに保存"""
+        output_path = Path(self.config.output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        
+        csv_file = output_path / (self.config.csv_path if self.config.csv_path else "detection_counts.csv")
+        
+        # 全クラス名を収集
+        all_classes = set()
+        for image_stats in self.detection_stats.values():
+            all_classes.update(k for k in image_stats.keys() if k != 'total')
+        all_classes = sorted(all_classes)
+        
+        # CSVヘッダー
+        fieldnames = ['image_name', 'total'] + all_classes
+        
+        with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            
+            # 各画像の検出数を書き込み
+            for image_name in sorted(self.detection_stats.keys()):
+                row = {'image_name': image_name}
+                row['total'] = self.detection_stats[image_name].get('total', 0)
+                for class_name in all_classes:
+                    row[class_name] = self.detection_stats[image_name].get(class_name, 0)
+                writer.writerow(row)
+            
+            # 合計行を追加
+            total_row = {'image_name': 'TOTAL'}
+            total_row['total'] = sum(stats.get('total', 0) for stats in self.detection_stats.values())
+            for class_name in all_classes:
+                total_row[class_name] = sum(stats.get(class_name, 0) for stats in self.detection_stats.values())
+            writer.writerow(total_row)
+        
+        if self.config.verbose >= 1:
+            print(f"📊 検出カウントCSVを保存しました: {csv_file}")
+            print(f"   総検出数: {total_row['total']}個")
+            print(f"   画像数: {len(self.detection_stats)}枚")
 
     def save_predictions(self) -> str:
         """予測結果をJSONファイルに保存"""

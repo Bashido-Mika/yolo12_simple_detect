@@ -6,13 +6,13 @@ YOLOモデルの評価を統一的に実行するCLI
 
 Usage:
     # Ultralyticsでの標準評価
-    python validate.py ultralytics --model best.pt --data data.yaml
+    uv run validate.py ultralytics --model best.pt --data data.yaml
     
     # SAHIでのスライス評価
-    python validate.py sahi --model best.pt --yolo-dataset Dataset/YOLODataset_test_with_label
+    uv run validate.py sahi --model best.pt --yolo-dataset Dataset/YOLODataset_test_with_label
     
     # 比較モード（UltralyticsとSAHIの両方）
-    python validate.py compare --model best.pt --yolo-dataset Dataset/YOLODataset_test_with_label
+    uv run validate.py compare --model best.pt --yolo-dataset Dataset/YOLODataset_test_with_label
 """
 
 import argparse
@@ -31,7 +31,17 @@ def parse_args():
         description="Unified Validation CLI for YOLO models",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-詳細な使用例はREADME.mdを参照してください。
+使用例:
+  # 基本的な評価
+  uv run validate.py ultralytics --model best.pt
+  
+  # SAHI評価
+  uv run validate.py sahi --yolo-dataset Dataset/YOLODataset_test_with_label
+  
+  # 比較モード（推奨）
+  uv run validate.py compare --yolo-dataset Dataset/YOLODataset_test_with_label
+
+詳細な使用例はVALIDATION_GUIDE.mdを参照してください。
         """
     )
     
@@ -105,6 +115,10 @@ def parse_args():
     sahi_parser.add_argument('--error-analysis', action='store_true', help='Generate error analysis plots')
     sahi_parser.add_argument('--predict-only', action='store_true', help='Prediction only mode (skip evaluation, generate COCO format predictions.json)')
     
+    # CSV export
+    sahi_parser.add_argument('--save-csv', action='store_true', help='Save detection counts to CSV file')
+    sahi_parser.add_argument('--csv-path', type=str, default=None, help='CSV output path (default: detection_counts.csv in output directory)')
+    
     # Other parameters
     sahi_parser.add_argument('--verbose', '-v', type=int, default=1, choices=[0, 1, 2], help='Verbosity level (0: none, 1: normal, 2: detailed)')
     sahi_parser.add_argument('--no-progress-bar', action='store_true', help='Hide progress bar')
@@ -160,6 +174,10 @@ def parse_args():
     
     # Analysis parameters
     compare_parser.add_argument('--error-analysis', action='store_true', help='Enable error analysis')
+    
+    # CSV export
+    compare_parser.add_argument('--save-csv', action='store_true', help='Save detection counts to CSV file')
+    compare_parser.add_argument('--csv-path', type=str, default=None, help='CSV output path (default: detection_counts.csv in output directory)')
     
     # Other parameters
     compare_parser.add_argument('--verbose', '-v', type=int, default=1, choices=[0, 1, 2], help='Verbosity level (0: none, 1: normal, 2: detailed)')
@@ -232,6 +250,8 @@ def run_sahi_validation(args):
         max_visual_samples=getattr(args, 'max_visual_samples', None),
         error_analysis=getattr(args, 'error_analysis', False),
         predict_only=getattr(args, 'predict_only', False),
+        save_csv=getattr(args, 'save_csv', False),
+        csv_path=getattr(args, 'csv_path', None),
         verbose=getattr(args, 'verbose', 1),
     )
     
@@ -320,6 +340,8 @@ def run_comparison(args):
         max_visual_samples=getattr(args, 'max_visual_samples', None),
         error_analysis=getattr(args, 'error_analysis', False),
         predict_only=False,
+        save_csv=getattr(args, 'save_csv', False),
+        csv_path=getattr(args, 'csv_path', None),
         verbose=getattr(args, 'verbose', 1),
     )
     

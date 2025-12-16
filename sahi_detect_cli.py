@@ -3,9 +3,14 @@
 SAHI-like Patch-Based Detection CLI
 YOLOv11 with patch-based inference for small object detection and segmentation
 
+Supports two backends:
+  - patched-yolo (default): Fast inference with patched_yolo_infer
+  - sahi: Official SAHI library with advanced features
+
 Usage:
-    python sahi_detect_cli.py --model runs/train/train12/weights/best.pt --source detect_images/
-    python sahi_detect_cli.py -m best.pt -s image.jpg --create-gif
+    uv run sahi_detect_cli.py --model runs/train/train12/weights/best.pt --source detect_images/
+    uv run sahi_detect_cli.py -m best.pt -s image.jpg --create-gif
+    uv run sahi_detect_cli.py -m best.pt -s images/ --backend sahi --save-csv
 """
 
 import argparse
@@ -112,6 +117,13 @@ def parse_args():
     )
     
     parser.add_argument(
+        '--device',
+        type=str,
+        default='0',
+        help='デバイス指定 (デフォルト: 0, 例: cpu, cuda:0, 0, 1)'
+    )
+    
+    parser.add_argument(
         '--nms-threshold',
         type=float,
         default=0.1,
@@ -122,6 +134,15 @@ def parse_args():
         '--no-batch-inference',
         action='store_true',
         help='バッチ推論を無効化（メモリ節約）'
+    )
+    
+    # Backend selection
+    parser.add_argument(
+        '--backend',
+        type=str,
+        default='patched-yolo',
+        choices=['patched-yolo', 'sahi'],
+        help='推論バックエンド: patched-yolo (高速) または sahi (公式SAHI)'
     )
     
     # GIF作成
@@ -294,7 +315,153 @@ def parse_args():
         help='GIFの最終フレームでもバウンディングボックスを表示する'
     )
 
+    # CSV出力
+    parser.add_argument(
+        '--save-csv',
+        action='store_true',
+        help='検出結果をCSVファイルに保存する'
+    )
+
+    parser.add_argument(
+        '--csv-path',
+        type=str,
+        default=None,
+        help='CSV出力パス（指定しない場合は出力ディレクトリ内のdetections.csv）'
+    )
+
     return parser.parse_args()
+
+
+def run_sahi_backend(args, verbose):
+    """公式SAHIバックエンドで検出を実行"""
+    try:
+        from sahi import AutoDetectionModel
+        from sahi.predict import get_sliced_prediction
+    except ImportError:
+        print("❌ エラー: SAHIライブラリがインストールされていません")
+        print("インストール: uv pip install sahi")
+        sys.exit(1)
+    
+    import cv2
+    import csv
+    from collections import defaultdict
+    
+    if verbose:
+        print(f"📦 バックエンド: 公式SAHI (https://github.com/obss/sahi)")
+        print(f"📦 モデル読み込み: {args.model}")
+    
+    # モデル読み込み
+    detection_model = AutoDetectionModel.from_pretrained(
+        model_type='ultralytics',
+        model_path=args.model,
+        confidence_threshold=args.conf,
+        device='cuda:0' if args.device == '0' else args.device,
+    )
+    
+    # 出力ディレクトリ作成
+    output_dir = args.output
+    i = 1
+    while True:
+        output_dir_candidate = f"{args.output}{i}" if i > 1 else args.output
+        if not Path(output_dir_candidate).exists():
+            output_dir = output_dir_candidate
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+            break
+        i += 1
+    
+    # 画像リスト取得
+    source_path = Path(args.source)
+    if source_path.is_file():
+        image_files = [source_path]
+    else:
+        image_files = []
+        for ext in ['*.jpg', '*.jpeg', '*.png', '*.bmp']:
+            image_files.extend(source_path.glob(ext))
+        image_files = sorted(image_files)
+    
+    if not image_files:
+        print(f"❌ 画像が見つかりません: {args.source}")
+        sys.exit(1)
+    
+    if verbose:
+        print(f"\n⚙️  設定:")
+        print(f"  スライスサイズ: {args.shape_x}x{args.shape_y}")
+        print(f"  オーバーラップ: {args.overlap_x}% x {args.overlap_y}%")
+        print(f"  信頼度閾値: {args.conf}")
+        print(f"  画像数: {len(image_files)}枚")
+        print(f"  保存先: {output_dir}\n")
+    
+    # 検出実行
+    detection_stats = defaultdict(lambda: defaultdict(int))
+    
+    for idx, img_path in enumerate(image_files):
+        if verbose:
+            print(f"[{idx+1}/{len(image_files)}] {img_path.name}")
+        
+        # スライス推論
+        result = get_sliced_prediction(
+            str(img_path),
+            detection_model,
+            slice_height=args.shape_y,
+            slice_width=args.shape_x,
+            overlap_height_ratio=args.overlap_y / 100.0,
+            overlap_width_ratio=args.overlap_x / 100.0,
+        )
+        
+        # 統計収集
+        for obj_pred in result.object_prediction_list:
+            class_name = obj_pred.category.name
+            detection_stats[img_path.name][class_name] += 1
+            detection_stats[img_path.name]['total'] += 1
+        
+        if verbose:
+            total_count = detection_stats[img_path.name].get('total', 0)
+            print(f"  検出数: {total_count}個")
+        
+        # 可視化保存
+        output_path = Path(output_dir) / img_path.name
+        result.export_visuals(
+            export_dir=str(output_dir),
+            file_name=img_path.stem,
+            text_size=args.font_scale / 4.0,  # SAHIは小さめのスケール
+            rect_th=args.box_thickness,
+            hide_labels=not args.show_class_labels,
+            hide_conf=args.no_confidences,
+        )
+    
+    # CSV保存
+    if args.save_csv:
+        csv_path = Path(output_dir) / "detection_counts.csv"
+        all_classes = set()
+        for stats in detection_stats.values():
+            all_classes.update(k for k in stats.keys() if k != 'total')
+        all_classes = sorted(all_classes)
+        
+        with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=['image_name', 'total'] + all_classes)
+            writer.writeheader()
+            
+            for image_name in sorted(detection_stats.keys()):
+                row = {'image_name': image_name, 'total': detection_stats[image_name].get('total', 0)}
+                for class_name in all_classes:
+                    row[class_name] = detection_stats[image_name].get(class_name, 0)
+                writer.writerow(row)
+            
+            # 合計行
+            total_row = {'image_name': 'TOTAL'}
+            total_row['total'] = sum(stats.get('total', 0) for stats in detection_stats.values())
+            for class_name in all_classes:
+                total_row[class_name] = sum(stats.get(class_name, 0) for stats in detection_stats.values())
+            writer.writerow(total_row)
+        
+        if verbose:
+            print(f"\n📊 CSV保存: {csv_path}")
+            print(f"   総検出数: {total_row['total']}個")
+    
+    if verbose:
+        print(f"\n✅ 完了！結果: {output_dir}")
+    
+    return output_dir
 
 
 def main():
@@ -316,6 +483,11 @@ def main():
         print("=" * 60)
         print("🚀 SAHI-like Patch-Based Detection")
         print("=" * 60)
+    
+    # バックエンド選択
+    if args.backend == 'sahi':
+        run_sahi_backend(args, verbose)
+        return
     
     # パッチベース検出を実行
     try:
@@ -339,7 +511,9 @@ def main():
             alpha=args.mask_alpha,
             thickness=max(1, args.box_thickness),
             font_scale=args.font_scale,
-            random_object_colors=not args.no_random_colors
+            random_object_colors=not args.no_random_colors,
+            save_csv=args.save_csv,
+            csv_path=args.csv_path
         )
         
         if not processed_images:
